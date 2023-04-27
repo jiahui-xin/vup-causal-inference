@@ -1,0 +1,1103 @@
+---
+title: "vup"
+output: html_document
+date: "2023-03-07"
+---
+# Introduction
+Virtual idols originate from Japan, with roots in anime and Japanese idol culture, and dating back to the 1980s. In the last decade, vtubers or virtual youtubers have emerged due to the popularity of  Internet and its devices like smartphones, PCs and 3D-detectors. 
+
+Vtuber in Bilibili platform (also named as vup) is an live-streaming entertainer who uses a virtual avatar generated using computer graphics and moved by real-time motion capture software. [Danmakus](https://danmakus.com/rank) shows hundreds of vups earned more than 0.1 million CNY every month and some can even earn 1 million CNY. Bilibili's virtual idol is a market with a billion CNY level every year.
+
+One question of interest is what factors influence income in vtuber live streams and how. We analyze the live data from different livers and aim to
+
+* illustrate the time-varing structure of vup market and
+
+* find the underlying relationship among live parameters.
+
+# Data analysis
+
+# data and setup
+Live data is from [wandleshen@github](https://github.com/wandleshen/vup-data-analysis/). They collect data with [Danmakus API](https://danmakus.com/) from last 50 live streams of 50 livers each at `2023-02-10 16:42:54`, all 2477 live streams. (Not every liver has 50 live streams.) Vtuber information data are manually collected from homepages, in which `liver`,`id`,`affiliation` are from [wandleshen@github](https://github.com/wandleshen/) and `sex`,`country`,`ip` are from myself.
+
+
+```{r, include=FALSE}
+library(reticulate)
+use_python("/opt/anaconda3/bin/python")
+use_condaenv(condaenv = "base", conda = "/opt/anaconda3/bin/conda")
+```
+
+
+```{python,include=F}
+import pandas as pd
+
+```
+
+
+```{python,include=F}
+df = pd.read_hdf('data.h5')
+df.info()
+```
+
+```{python,include=F}
+df.to_csv('data.csv', index=False)
+```
+
+
+```{r}
+df <- read.csv("data.csv")
+vtb=read.csv("vtb2.csv")
+str(vtb)
+vtb$X=NULL
+vtb$sex=as.factor(vtb$sex)
+vtb$ip=as.factor(vtb$ip)
+vtb$country=as.factor(vtb$country)
+
+
+```
+```{r,message=F}
+library(GGally)
+library(pheatmap)
+library(reshape2)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(extrafont)
+library(marginaleffects)
+library(MatchIt)
+library(grf)
+library(randomForest)
+#font_import()
+#fonts()
+```
+
+
+```{r}
+str(df)
+summary(df)
+```
+## Exploratory Data Analysis
+
+
+```{r}
+ggplot(data = df, aes(x = (startDate-min(startDate))/8.64e07)) + geom_histogram(binwidth=1)+
+  xlab("Day")
+ggplot(data = df, aes(x = timeDuration/3.6e06)) + geom_histogram(binwidth=1)+
+  xlab("Hour")
+```
+
+Transform the date type and remove streams which `timeDuration<0`.
+
+```{r}
+df_tf=mutate(df, posix_startDate = with_tz(as.POSIXct(startDate / 1000, origin = "1970-01-01", tz = "UTC"), "Asia/Shanghai"),
+             posix_stopDate = with_tz(as.POSIXct(stopDate / 1000, origin = "1970-01-01", tz = "UTC"), "Asia/Shanghai"))
+
+df_tf=df_tf%>%
+  mutate(weekday=factor(weekdays(posix_startDate), levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")),timeDuration=timeDuration/3.6e06)%>%
+  filter(timeDuration>0)%>%
+  merge(vtb)
+```
+
+```{r,message=F,include=F,echo=F}
+plot(df_tf[,c(3,6,8,9,10,11,12,14,15,20,24)])
+```
+
+
+```{r fig.height=8, fig.width=10, include=F, echo=F}
+
+ggplot(data = df_tf, aes(x = posix_startDate, y = watchCount, color = liver)) +
+  geom_line() +
+  labs(title = "Time Series of Live Data", x = "Date", y = "Watch Count") +
+  theme(legend.key.size = unit(2, 'mm'), #change legend key size
+        legend.key.height = unit(2, 'mm'), #change legend key height
+        legend.key.width = unit(2, 'mm'), #change legend key width
+        legend.title = element_text(size=10), #change legend title font size
+        legend.text = element_text(size=10), #change legend text font size
+        legend.position = c(0.3, 0.7) )
+
+```
+
+
+
+```{r}
+ggplot(melt(df_tf[,c(3,6,8,9,10,11,12,14,15,18)],id="posix_startDate"),
+            aes(x = posix_startDate,y = value) )+
+  geom_line()+
+  facet_wrap(~variable,scales = "free_y",ncol=3)
+```
+
+Plot the time series and find three peaks at about `2022-10-30`, Christmas Eve and Spring Festival.
+```{r}
+df_tf%>%arrange(desc(membershipIncome))%>%
+  transmute(liver,title,membershipIncome,totalIncome,posix_startDate)%>%head()
+```
+
+```{r,include=F,echo=F}
+# Create a new data frame with the time series for each variable in a separate column
+df_new <- with(df_tf,data.frame(posix_startDate = posix_startDate,
+                     totalIncome = totalIncome,
+                     timeDuration=timeDuration/3.6e06,
+                     danmakusCount = danmakusCount,
+                     watchCount = watchCount,
+                     superchatCount=superchatCount,
+                     superchatIncome=superchatIncome,
+                     membershipCount=membershipCount,
+                     membershipIncome=membershipIncome
+                     
+                     ))
+
+# Melt the data frame to long format
+
+# Plot the time series for each variable in a separate panel
+ggplot(reshape2::melt(df_new, id.vars = "posix_startDate", variable.name = "Variable", value.name = "Value"),
+       aes(x = posix_startDate, y = Value)) +
+  geom_line() +
+  facet_wrap(~ Variable, scales = "free_y", ncol = 2) +
+  labs(title = "Time Series of Multiple Variables", x = "Date", y = "Value") 
+
+
+```
+
+```{r,include=F,echo=F}
+# Create a new data frame with the time series for each variable in a separate column
+df_new <- with(df_tf,data.frame(weekdays=factor(weekday, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")),
+                     totalIncome = totalIncome,
+                     timeDuration=timeDuration/3.6e06,
+                     danmakusCount = danmakusCount,
+                     watchCount = watchCount,
+                     superchatCount=superchatCount,
+                     superchatIncome=superchatIncome,
+                     membershipCount=membershipCount,
+                     membershipIncome=membershipIncome
+                     
+                     ))
+
+# Melt the data frame to long format
+
+# Plot the time series for each variable in a separate panel
+ggplot(melt(df_new, id.vars = "weekdays", variable.name = "Variable", value.name = "Value"),
+       aes(x = weekdays, y = log(Value)) ) +
+  geom_jitter(alpha=0.3) +
+  facet_wrap(~ Variable, scales = "free_y", ncol = 2) +
+  labs(title = "Jitter of Multiple Variables (log)", x = "weekday", y = "Value") 
+```
+
+
+```{r}
+par(mfrow=c(1,2))
+
+df_tf%>%
+  group_by(weekadays=factor(weekday, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")))%>%
+  summarise(watchCount = median(watchCount),
+            interactionCount = median(interactionCount),
+            totalIncome = median(totalIncome),
+            danmakusCount = median(danmakusCount),
+            superchatIncome=median(superchatIncome),
+            membershipIncome=median(membershipIncome)
+            )%>%
+  plot(main="median per weekday")
+
+```
+
+```{r}
+df_tf%>%
+  group_by(weekdays=factor(weekday, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")))%>%
+  summarise(watchCount = sum(watchCount),
+            interactionCount = sum(interactionCount),
+            totalIncome = sum(totalIncome),
+            danmakusCount = sum(danmakusCount),
+            superchatIncome=sum(superchatIncome),
+            membershipIncome=sum(membershipIncome)
+            )%>%
+  plot(main="sum per weekday")
+```
+
+Saturday is the best day and Sunday is the second. I guess mang viewers work till Saturday evening.
+
+```{r}
+df_tf%>%
+  transmute(danmakusCount,interactionCount,timeDuration,totalIncome,superchatCount,superchatIncome,membershipCount,membershipIncome,followers)%>%
+  cor()%>%
+  pheatmap()
+```
+```{r,include=F,echo=F}
+df_tf%>%
+  transmute(danmakusAvg=danmakusCount/timeDuration,interactionAvg=interactionCount/timeDuration,timeDuration,AvgIncome=totalIncome/timeDuration,superchatAvg=superchatCount/timeDuration,AvgsuperchatIncome=superchatIncome/timeDuration,membershipAvg=membershipCount/timeDuration,AvgmembershipIncome=membershipIncome/timeDuration,followers)%>%
+  cor()%>%
+  pheatmap()
+```
+
+Every two variables have positive correlation. `hclust` (Hierarchical Clustering) shows that three clusters: `followers, timeDuration`, `totalIncome,membershipCount,membershipIncome` and `superchatCount,superchatIncome,danmakusCount,interactionCount` .
+
+```{r,fig.height=8,fig.width=10,message=F}
+ggplot(df_tf%>%group_by(liver)%>%summarize(mean.totalIncome=mean(totalIncome),mean.watchCount=mean(watchCount),followers=mean(followers), affiliation=affiliation[1], mean.danmakusCount=mean(danmakusCount), mean.superchatCount=mean(superchatCount),mean.membershipCount=mean(membershipCount), mean.superchatIncome=mean(superchatIncome), mean.membershipIncome=mean(membershipIncome) ), aes(x=log(mean.watchCount), y=log(mean.totalIncome), size = followers, color = affiliation)) +
+  geom_point(alpha=0.6)+
+  geom_text(aes(label = liver),hjust=0, vjust=0,family="Songti SC")+
+  theme_bw(base_family = "Songti SC")+
+  scale_colour_brewer(palette="Set1")+
+  geom_smooth(method=lm,aes(color = NULL))+
+  guides(size = guide_legend(override.aes = list(linetype = 0)),
+         color = guide_legend(override.aes = list(linetype = 0)))
+```
+
+Linear regression performs well
+
+```{r,fig.height=8,fig.width=10,message=F,include=F,echo=F}
+ggplot(df_tf%>%group_by(liver)%>%summarize(mean.totalIncome=mean(totalIncome),mean.watchCount=mean(watchCount),followers=mean(followers), affiliation=affiliation[1], mean.danmakusCount=mean(danmakusCount), mean.superchatCount=mean(superchatCount),mean.membershipCount=mean(membershipCount), mean.superchatIncome=mean(superchatIncome), mean.membershipIncome=mean(membershipIncome) ), aes(x=log(mean.membershipCount), y=log(mean.totalIncome), size = followers, color = affiliation)) +
+geom_point(alpha=0.6)+
+  geom_smooth(method=lm,aes(color = NULL))+
+  geom_text(aes(label = liver),hjust=0, vjust=0,family="Songti SC")+
+  theme_bw(base_family = "Songti SC")+
+  scale_colour_brewer(palette = "Greens")+
+  guides(size = guide_legend(override.aes = list(linetype = 0)),
+         color = guide_legend(override.aes = list(linetype = 0)))
+```
+
+
+```{r,message=F}
+ggplot(df_tf%>%group_by(weekday)%>%summarize(mean.totalIncome=mean(totalIncome),mean.watchCount=mean(watchCount),followers=mean(followers),  mean.danmakusCount=mean(danmakusCount), mean.superchatCount=mean(superchatCount),mean.membershipCount=mean(membershipCount), mean.superchatIncome=mean(superchatIncome), mean.membershipIncome=mean(membershipIncome) ), aes(x=log(mean.watchCount), y=log(mean.totalIncome), size = mean.membershipCount, color = mean.superchatCount)) +
+geom_point(alpha=0.6)+
+  geom_smooth(method=lm,aes(color = NULL))+
+  geom_text(aes(label = weekday),hjust=0, vjust=0,family="Songti SC")+
+  scale_fill_viridis_c()+
+  guides(size = guide_legend(override.aes = list(linetype = 0)),
+         color = guide_legend(override.aes = list(linetype = 0)))
+```
+
+# stamp process
+```{r,include=F}
+membership_hour<-c()
+membership_min<-c()
+for(i in (1:nrow(df_tf))){
+  # character vector
+  char_vec <- (df_tf$membershipTimestamps)[i]
+  
+  # remove the brackets and split the string by commas
+  num_vec <- strsplit(gsub("\\[|\\]", "", char_vec), ", ")[[1]]
+  
+  # convert the numeric strings to numeric values
+  num_vec <- as.numeric(num_vec)
+  
+  # print the numeric vector
+  posix_vec=with_tz(as.POSIXct(num_vec / 1000, origin = "1970-01-01", tz = "UTC"), "Asia/Shanghai")
+  membership_hour<-c(membership_hour,
+                     as.numeric(format(posix_vec,"%H")) )
+  membership_min<-c(membership_min,
+                     as.numeric(format(posix_vec,"%M")) )
+}
+
+
+membership_time<-membership_hour+membership_min/60
+
+```
+
+```{r,include=F}
+superchat_hour<-c()
+superchat_min<-c()
+for(i in (1:nrow(df_tf))){
+  # character vector
+  char_vec <- (df_tf$superchatTimestamps)[i]
+  
+  # remove the brackets and split the string by commas
+  num_vec <- strsplit(gsub("\\[|\\]", "", char_vec), ", ")[[1]]
+  
+  # convert the numeric strings to numeric values
+  num_vec <- as.numeric(num_vec)
+  
+  # print the numeric vector
+  posix_vec=with_tz(as.POSIXct(num_vec / 1000, origin = "1970-01-01", tz = "UTC"), "Asia/Shanghai")
+  superchat_hour<-c(superchat_hour,
+                     as.numeric(format(posix_vec,"%H")) )
+  superchat_min<-c(superchat_min,
+                     as.numeric(format(posix_vec,"%M")) )
+}
+
+superchat_time<-superchat_hour+superchat_min/60
+
+```
+
+
+```{r,include=F}
+time_vec=(0:(1440-1))/60
+superchat_num=c()
+for (point in time_vec){
+  superchat_num=c(superchat_num,
+                  sum(point==superchat_time) )
+}
+membership_num=c()
+for (point in time_vec){
+  membership_num=c(membership_num,
+                  sum(point==membership_time) )
+}
+```
+
+```{r,include=F}
+start_hour<-as.numeric(format(df_tf$posix_startDate,"%H"))
+start_min<-as.numeric(format(df_tf$posix_startDate,"%M"))
+
+start_time<-start_hour+start_min/60
+
+stop_hour<-as.numeric(format(df_tf$posix_stopDate,"%H"))
+stop_min<-as.numeric(format(df_tf$posix_stopDate,"%M"))
+
+stop_time<-stop_hour+stop_min/60
+
+start_num=c()
+for (point in time_vec){
+  start_num=c(start_num,
+                  sum(point==start_time) )
+}
+stop_num=c()
+for (point in time_vec){
+  stop_num=c(stop_num,
+                  sum(point==stop_time) )
+}
+
+```
+
+
+```{r,include=F}
+modify_stop_time<-stop_time
+modify_stop_time[stop_time<start_time]=modify_stop_time[stop_time<start_time]+24
+time_vec=(0:(1440-1))/60
+online_num<-c()
+for (point in time_vec){
+  online_num=c(online_num,
+               sum(modify_stop_time>=point & start_time<point)+
+                 sum(modify_stop_time>=point+24 & start_time<point+24) )
+}
+
+
+```
+
+```{r}
+ggplot(melt(data.frame(time=time_vec,
+                       superchat=superchat_num,membership=membership_num,
+                       start=start_num,stop=stop_num,liver=online_num),id="time"),
+            aes(x = time,y = value) )+
+  geom_path()+
+  facet_wrap(~variable,scales = "free_y",ncol=2)+
+  scale_x_continuous(breaks = seq(0, 24, by = 2))
+```
+
+There are peaks at the hours and the really high peak at `0:00`. In addition, `membershipCount` keeps high in `18:00-22:00` and `superchatCount` keeps high in `20:00-24:00`.
+
+Most livers `start` at hours like `20:00` which leads to peaks of  `membershipCount` and `superchatCount`. The peak at `0:00` is possibly due to meaning of beginning and Bilibili automatic renewal.
+
+# Future Plan
+* The linear regression `log(totalIncome)~log(membersdhipCount)` seems to work well. However, we still have factor variables like `ip`, `country`, `liver`, `weekday` which can be exploited with tree methods and furthermore random forest. Neuron networks can perhaps do a good job but we maybe lose all of interpretability.
+
+* Bayesian hierarchical regression can also be used with two layers, first for liver and the second for live streams.
+
+* Some techniques in time series like ARIMA, VAR models can be used to model the time-varing data.
+
+
+```{r,include=F,echo=F}
+# Create a POSIX datetime object
+my_datetime <- as.POSIXct("2022-12-07 00:00:00", tz = "UTC")
+
+# Get the number of milliseconds from 1970-01-01
+milliseconds <- as.numeric(my_datetime) * 1000
+
+# Print the result
+milliseconds = min(df$startDate) + 2e10
+```
+
+
+```{r, include=F, echo=F}
+df%>%
+  filter(startDate<milliseconds)%>%
+  transmute(posix_startDate = as.POSIXct(startDate / 1000, origin = "1970-01-01", tz = "UTC"))%>%
+  arrange(posix_startDate)%>%
+  head()
+df%>%
+  filter(startDate<milliseconds)%>%
+  transmute(posix_startDate = as.POSIXct(startDate / 1000, origin = "1970-01-01", tz = "UTC"))%>%
+  arrange(posix_startDate)%>%
+  tail()
+```
+```{r,include=F,echo=F}
+df_after<-filter(df_tf,timeDuration>0 & startDate>milliseconds)
+
+ggplot(data = df_after, aes(x = startDate-milliseconds)) + geom_histogram(binwidth=8.64e07)
+ggplot(data = df_after, aes(x = timeDuration)) + geom_histogram(binwidth=3.6e06)
+```
+```{r,include=F,echo=F}
+df_before<-filter(df_tf,timeDuration>0 & startDate<milliseconds)
+
+ggplot(data = df_before, aes(x = (startDate-milliseconds))) + geom_histogram(binwidth=8.64e07)
+ggplot(data = df_before, aes(x = timeDuration)) + geom_histogram(binwidth=3.6e06)
+```
+```{r,include=F,echo=F}
+df_tf%>%
+  group_by(liver)%>%
+  summarize(early=min(posix_startDate),late=max(posix_startDate))%>%
+  arrange(early)
+
+df_after%>%
+  group_by(liver)%>%
+  summarize(early=min(posix_startDate),late=max(posix_startDate))%>%
+  arrange(early)
+
+df%>%
+  group_by(liver) %>%
+  summarize(count = n())%>%
+  arrange(count)
+
+df_before %>%
+  group_by(liver) %>%
+  summarize(count = n())%>%
+  arrange(count)
+
+df_after %>%
+  group_by(liver) %>%
+  summarize(count = n())%>%
+  arrange(count)
+```
+
+```{r,include=F,echo=F}
+as.POSIXct("2023-02-10")-as.POSIXct("2022-12-21")
+```
+
+# PCA and kmeans
+```{r}
+col_num<-unlist(lapply(df_tf, is.numeric))
+col_num[c(4,5,22)]=FALSE
+col_num
+pca<-prcomp(log(df_tf[,col_num]+1))
+pca
+
+```
+
+```{r}
+plot(cumsum((pca$sdev))/sum(pca$sdev))
+```
+
+```{r}
+biplot(pca)
+biplot(pca,c(1,3))
+biplot(pca,2:3)
+```
+```{r}
+proc0<-function(dt){
+  for(i in 1:nrow(dt)){
+  for(j in 1:ncol(dt)){
+    dt[i,j]=max(dt[i,j],0.5)
+  }
+}
+return(dt)
+}
+```
+
+```{r}
+
+clust<-kmeans(as.matrix(log(proc0(df_tf[,col_num])) ),3)
+clust
+```
+
+```{r}
+sum(df_tf$membershipCount==0)
+```
+
+
+```{r}
+plot(pca$x[,1:2] , col=clust$cluster)
+
+
+plot(pca$x[,c(1,3)] , col=clust$cluster)
+
+plot(pca$x[,2:3] , col=clust$cluster)
+```
+
+```{r}
+table(df_tf[clust$cluster==1,"weekday"])
+table(df_tf[clust$cluster==2,"weekday"])
+table(df_tf[clust$cluster==3,"weekday"])
+```
+
+```{r}
+(table(df_tf[clust$cluster==1,"affiliation"]))
+(table(df_tf[clust$cluster==2,"affiliation"]))
+(table(df_tf[clust$cluster==3,"affiliation"]))
+```
+
+
+# Random Forest
+```{r}
+df_rf=df_tf
+df_rf$liver=factor(df_rf$liver)
+df_rf$area=factor(df_rf$area)
+df_rf$affiliation=factor(df_rf$affiliation)
+df_rf$title=NULL
+df_rf$startDate=NULL
+df_rf$stopDate=NULL
+df_rf$superchatTimestamps=NULL
+df_rf$membershipTimestamps=NULL
+df_rf$posix_startDate=NULL
+df_rf$posix_stopDate=NULL
+df_rf$id=NULL
+```
+
+```{r}
+set.seed(123456)
+N=nrow(df_rf)
+ind_train=sample(1:N,ceiling(N*0.8))
+ind_test=(1:N)[-ind_train]
+train=df_rf[ind_train,c(3:8,10,12)]
+test=df_rf[ind_test,c(3:8,10,12)]
+
+```
+
+```{r}
+summary(train)
+for(i in 1:nrow(train)){
+  for(j in 1:ncol(train)){
+    train[i,j]=max(train[i,j],0.1)
+  }
+}
+for(i in 1:nrow(test)){
+  for(j in 1:ncol(test)){
+    test[i,j]=max(test[i,j],0.1)
+  }
+}
+
+```
+
+
+
+```{r}
+library(randomForest)
+
+set.seed(123456)
+rf <- randomForest(totalIncome ~ ., data=log(train),ntree=100,
+                         importance=TRUE, na.action=na.omit)
+print(rf)
+## Show "importance" of variables: higher value mean more important:
+round(importance(rf), 2)
+```
+
+```{r}
+lr<-lm(totalIncome ~ ., data=log(train))
+
+summary(lr)
+```
+
+```{r}
+plot(lr)
+```
+
+
+```{r}
+lr_fit=exp(predict(lr,log(test)))
+lr_resid=(test$totalIncome)-(lr_fit)
+summary(lr_resid)
+
+sqrt(mean(lr_resid^2))
+
+
+mean(abs(lr_resid))
+
+mean(abs(lr_resid)/max(test$totalIncome,1))
+```
+
+```{r}
+rf_fit=exp(predict(rf,log(test)))
+rf_resid=test$totalIncome - rf_fit
+summary( rf_resid )
+
+
+sqrt(mean( rf_resid^2) )
+
+mean( abs( rf_resid ) )
+
+
+test[which.max(abs(rf_resid)),]
+
+mean(abs(rf_resid)/max(test$totalIncome,1))
+```
+
+```{r}
+varImpPlot(rf)
+
+```
+
+
+
+```{r}
+plot(rf)
+```
+
+
+# Regression adjustment
+```{r}
+proc0<-function(dt){
+  for(i in 1:nrow(dt)){
+  for(j in 1:ncol(dt)){
+    dt[i,j]=max(dt[i,j],0.5)
+  }
+}
+return(dt)
+}
+```
+
+```{r}
+df_causal<-df_rf[,c(3:8,10,12)]
+df_causal<-proc0(df_causal)
+df_causal<-log(df_causal)
+df_causal<-as.data.frame(t(t(df_causal)-colMeans(df_causal)) )
+df_causal$W1=0
+df_causal[df_rf$affiliation=="independent","W1"]=1
+df_causal$W2=0
+df_causal[(df_rf$weekday=="Sunday")|(df_rf$weekday=="Saturday"),"W2"]=1
+df_causal<-df_causal[df_rf$totalIncome>=1,]
+```
+
+```{r}
+lr<-lm(totalIncome~.-W1-W2,df_causal)
+summary(lr)
+plot(lr)
+```
+
+
+```{r}
+lr0<-lm(totalIncome~W1,df_causal)
+summary(lr0)
+
+with(df_causal, t.test( (totalIncome[W1==1]), (totalIncome[W1==0]) ) )
+```
+
+```{r}
+lr1<-lm(totalIncome~(.-W2),df_causal)
+summary(lr1)
+plot(lr1)
+```
+
+
+```{r}
+lr2<-lm(totalIncome~(.-W2)+W1*(.-W2),df_causal)
+summary(lr2)
+plot(lr2)
+```
+
+
+
+
+```{r}
+lr0<-lm(totalIncome~W2,df_causal)
+summary(lr0)
+
+with(df_causal, t.test( (totalIncome[W2==1]), (totalIncome[W2==0]) ) )
+```
+
+```{r}
+lr1<-lm(totalIncome~(.-W1),df_causal)
+summary(lr1)
+
+```
+
+```{r}
+lr2<-lm(totalIncome~(.-W1)+W2*(.-W1),df_causal)
+summary(lr2)
+
+```
+
+```{r}
+cor(lr2$residuals,df_causal$W2)
+```
+
+
+
+```{r}
+df_rf$otherIncome<-with(df_rf,totalIncome-membershipIncome-superchatIncome)
+
+
+hist(df_rf$otherIncome/max(df_rf$totalIncome,1))
+
+summary(df_rf$otherIncome/max(df_rf$totalIncome,1))
+```
+
+
+
+
+
+# causal forest
+
+```{r}
+library(grf)
+
+```
+
+
+```{r}
+set.seed(114514)
+X=df_causal[,-c(3,9,10)]
+Y=df_causal[,"totalIncome"]
+W=df_causal[,"W1"]
+
+forest.W <- regression_forest(X, W, tune.parameters = "all")
+W.hat <- predict(forest.W)$predictions
+
+forest.Y <- regression_forest(X, Y, tune.parameters = "all")
+Y.hat <- predict(forest.Y)$predictions
+
+tau.forest <- causal_forest(X, Y, W,
+  W.hat = W.hat, Y.hat = Y.hat,
+  tune.parameters = "all"
+)
+tau.hat <- predict(tau.forest)$predictions
+
+summary(tau.hat)
+
+average_treatment_effect(tau.forest, target.sample = "overlap",method="TMLE")
+
+average_treatment_effect(tau.forest, target.sample = "overlap",method="AIPW")
+```
+```{r}
+ggplot(NULL, aes(x=df_causal$totalIncome, y=W.hat)) + 
+  geom_point(aes(color=df_causal$W1))
+summary(W.hat)
+ggplot(NULL, aes(W.hat, fill=factor(df_causal$W1) )) + 
+  geom_density(alpha=.5) + 
+  scale_fill_manual(values = c('#999999','#E69F00'))
+summary(W.hat-W)
+
+forest.Y
+```
+
+
+```{r}
+set.seed(114514)
+X=df_causal[,-c(3,9,10)]
+Y=df_causal[,"totalIncome"]
+W=df_causal[,"W1"]
+
+tau.forest <- causal_forest(X, Y, W,
+  tune.parameters = "all"
+)
+tau.hat <- predict(tau.forest)$predictions
+
+head(predict(tau.forest,estimate.variance = TRUE))
+summary(tau.hat)
+
+average_treatment_effect(tau.forest, target.sample = "overlap")
+```
+
+
+```{r}
+varimp <- variable_importance(tau.forest)
+ranked.vars <- order(varimp, decreasing = TRUE)
+
+# Top 5 variables according to this measure
+colnames(X)[ranked.vars[1:7]]
+#> [1] "financial.autonomy.index"           "intention.to.save.index"           
+#> [3] "family.receives.cash.transfer"      "has.computer.with.internet.at.home"
+#> [5] "is.female"
+
+best_linear_projection(tau.forest, X)
+```
+
+```{r}
+best_linear_projection(tau.forest, X)
+```
+
+
+```{r}
+# See if a causal forest succeeded in capturing heterogeneity by plotting
+# the TOC and calculating a 95% CI for the AUTOC.
+set.seed(114514)
+X=df_causal[,-c(3,9,10)]
+Y=df_causal[,"totalIncome"]
+W=df_causal[,"W1"]
+
+n=nrow(df_causal)
+train <- sample(1:n, n / 2)
+
+forest.W <- regression_forest(X[train,], W[train], tune.parameters = "all")
+W.hat <- predict(forest.W)$predictions
+
+forest.Y <- regression_forest(X[train,], Y[train], tune.parameters = "all")
+Y.hat <- predict(forest.Y)$predictions
+
+train.forest <- causal_forest(X[train, ], Y[train], W[train], W.hat = W.hat, Y.hat = Y.hat,
+  tune.parameters = "all")
+
+forest.W <- regression_forest(X[-train,], W[-train], tune.parameters = "all")
+W.hat <- predict(forest.W)$predictions
+
+forest.Y <- regression_forest(X[-train,], Y[-train], tune.parameters = "all")
+Y.hat <- predict(forest.Y)$predictions
+
+eval.forest <- causal_forest(X[-train, ], Y[-train], W[-train], W.hat = W.hat, Y.hat = Y.hat,
+  tune.parameters = "all")
+rate <- rank_average_treatment_effect(eval.forest,
+predict(train.forest, X[-train, ])$predictions)
+plot(rate)
+paste("AUTOC:", round(rate$estimate, 2), "+/", round(1.96 * rate$std.err, 2))
+
+```
+
+
+
+
+
+
+```{r}
+set.seed(114514)
+X=df_causal[,-c(3,9,10)]
+Y=df_causal[,"totalIncome"]
+W=df_causal[,"W2"]
+
+forest.W <- regression_forest(X, W, tune.parameters = "all")
+W.hat <- predict(forest.W)$predictions
+
+forest.Y <- regression_forest(X, Y, tune.parameters = "all")
+Y.hat <- predict(forest.Y)$predictions
+
+tau.forest <- causal_forest(X, Y, W,
+  W.hat = W.hat, Y.hat = Y.hat,
+  tune.parameters = "all"
+)
+tau.hat <- predict(tau.forest)$predictions
+
+head(predict(tau.forest,estimate.variance = TRUE))
+summary(tau.hat)
+
+average_treatment_effect(tau.forest, target.sample = "overlap")
+```
+
+```{r}
+
+ggplot(NULL, aes(x=df_causal$totalIncome, y=W.hat)) + 
+  geom_point(aes(color=df_causal$W2))
+summary(W.hat)
+ggplot(NULL, aes(W.hat, fill=factor(df_causal$W2) )) + 
+  geom_density(alpha=.5) + 
+  scale_fill_manual(values = c('#999999','#E69F00'))
+summary(W.hat-W)
+
+forest.Y
+```
+
+```{r}
+varimp <- variable_importance(tau.forest)
+ranked.vars <- order(varimp, decreasing = TRUE)
+
+# Top 5 variables according to this measure
+colnames(X)[ranked.vars[1:7]]
+#> [1] "financial.autonomy.index"           "intention.to.save.index"           
+#> [3] "family.receives.cash.transfer"      "has.computer.with.internet.at.home"
+#> [5] "is.female"
+
+best_linear_projection(tau.forest, X)
+```
+
+
+```{r}
+set.seed(114514)
+X=df_causal[,-c(3,9,10)]
+Y=df_causal[,"totalIncome"]
+W=df_causal[,"W2"]
+
+tau.forest <- causal_forest(X, Y, W,
+  tune.parameters = "all"
+)
+tau.hat <- predict(tau.forest)$predictions
+
+head(predict(tau.forest,estimate.variance = TRUE))
+summary(tau.hat)
+
+average_treatment_effect(tau.forest, target.sample = "overlap")
+```
+
+
+
+
+
+```{r}
+# See if a causal forest succeeded in capturing heterogeneity by plotting
+# the TOC and calculating a 95% CI for the AUTOC.
+set.seed(114514)
+X=df_causal[,-c(3,9,10)]
+Y=df_causal[,"totalIncome"]
+W=df_causal[,"W2"]
+
+n=nrow(df_causal)
+train <- sample(1:n, n / 2)
+
+forest.W <- regression_forest(X[train,], W[train], tune.parameters = "all")
+W.hat <- predict(forest.W)$predictions
+
+forest.Y <- regression_forest(X[train,], Y[train], tune.parameters = "all")
+Y.hat <- predict(forest.Y)$predictions
+
+train.forest <- causal_forest(X[train, ], Y[train], W[train], W.hat = W.hat, Y.hat = Y.hat,
+  tune.parameters = "all")
+
+forest.W <- regression_forest(X[-train,], W[-train], tune.parameters = "all")
+W.hat <- predict(forest.W)$predictions
+
+forest.Y <- regression_forest(X[-train,], Y[-train], tune.parameters = "all")
+Y.hat <- predict(forest.Y)$predictions
+
+eval.forest <- causal_forest(X[-train, ], Y[-train], W[-train], W.hat = W.hat, Y.hat = Y.hat,
+  tune.parameters = "all")
+rate <- rank_average_treatment_effect(eval.forest,
+predict(train.forest, X[-train, ])$predictions)
+plot(rate)
+paste("AUTOC:", round(rate$estimate, 2), "+/", round(1.96 * rate$std.err, 2))
+
+```
+
+
+
+# matchit
+```{r}
+library(MatchIt)
+m.out <- matchit(W1 ~ danmakusCount+timeDuration+watchCount+interactionCount+superchatCount+membershipCount+followers, data = df_causal,
+                 method = "full", estimand = "ATE")
+summary(m.out)
+```
+
+```{r}
+
+plot(summary(m.out))
+m.data <- match.data(m.out)
+
+head(m.data)
+```
+
+```{r}
+library("marginaleffects")
+set.seed(114514)
+X=m.data[,c(1:2,4:8)]
+Y=m.data[,"totalIncome"]
+W=m.data[,"W1"]
+
+
+tau.forest <- causal_forest(X, Y, W,
+  tune.parameters = "all",sample.weights = m.data$weights
+)
+tau.hat <- predict(tau.forest)$predictions
+
+head(predict(tau.forest,estimate.variance = TRUE))
+summary(tau.hat)
+
+average_treatment_effect(tau.forest, target.sample = "all")
+average_treatment_effect(tau.forest, target.sample = "treated")
+average_treatment_effect(tau.forest, target.sample = "control")
+average_treatment_effect(tau.forest, target.sample = "overlap")
+```
+
+```{r}
+library("marginaleffects")
+
+fit <- lm(totalIncome~(.-W2-distance-weights-subclass)+W1*(.-W2-distance-weights-subclass),data = m.data, weights = weights)
+
+avg_comparisons(fit,
+                variables = "W1",
+                vcov = ~subclass,
+                wts = "weights")
+
+```
+
+```{r}
+library("marginaleffects")
+
+fit <- lm(totalIncome~(.-W2-distance-weights-subclass),data = m.data, weights = weights)
+
+avg_comparisons(fit,
+                variables = "W1",
+                vcov = ~subclass,
+                wts = "weights")
+
+```
+
+```{r}
+library("marginaleffects")
+
+fit <- lm(totalIncome~W1,data = m.data, weights = weights)
+
+avg_comparisons(fit,
+                variables = "W1",
+                vcov = ~subclass,
+                wts = "weights")
+
+```
+
+
+
+
+```{r}
+library(MatchIt)
+m.out2 <- matchit(W2 ~ danmakusCount+timeDuration+watchCount+interactionCount+superchatCount+membershipCount+followers, data = df_causal,
+                 method = "full", estimand = "ATE")
+summary(m.out2)
+```
+
+```{r}
+
+plot(summary(m.out2))
+m.data2 <- match.data(m.out2)
+
+head(m.data2)
+```
+
+```{r}
+library("marginaleffects")
+
+fit <- lm(totalIncome~(.-W1-distance-weights-subclass)+W2*(.-W1-distance-weights-subclass),data = m.data2, weights = weights)
+
+avg_comparisons(fit,
+                variables = "W2",
+                vcov = ~subclass,
+                wts = "weights")
+
+```
+
+```{r}
+library("marginaleffects")
+
+fit <- lm(totalIncome~(.-W1-distance-weights-subclass),data = m.data2, weights = weights)
+
+avg_comparisons(fit,
+                variables = "W2",
+                vcov = ~subclass,
+                wts = "weights")
+
+```
+
+```{r}
+library("marginaleffects")
+
+fit <- lm(totalIncome~W2,data = m.data2, weights = weights)
+
+avg_comparisons(fit,
+                variables = "W2",
+                vcov = ~subclass,
+                wts = "weights")
+
+```
+
+```{r}
+library("marginaleffects")
+set.seed(114514)
+X=m.data2[,c(1:2,4:8)]
+Y=m.data2[,"totalIncome"]
+W=m.data2[,"W2"]
+
+
+tau.forest <- causal_forest(X, Y, W,
+  tune.parameters = "all",sample.weights = m.data2$weights
+)
+tau.hat <- predict(tau.forest)$predictions
+
+head(predict(tau.forest,estimate.variance = TRUE))
+summary(tau.hat)
+
+average_treatment_effect(tau.forest, target.sample = "all")
+average_treatment_effect(tau.forest, target.sample = "treated")
+average_treatment_effect(tau.forest, target.sample = "control")
+average_treatment_effect(tau.forest, target.sample = "overlap")
+```
+
+
+
