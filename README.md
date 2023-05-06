@@ -11,7 +11,7 @@ Thanks for your reading! If your time is limited, just read *analysis_report*!
 
 ## Data description
 
-Select 50 different virtual hosts and get revenue and engagement data for their last 50 live streams. The size of such a data set is sufficient for us to perform some simple analysis, but it is not too large, which makes the analysis process too cumbersome. Their names, projects or unions they belong to, and user IDs are all manually entered into a csv file for subsequent data grabbing.
+Select 50 different virtual hosts and get revenue and engagement data for their last 50 live streams. Their names, projects or unions they belong to, and user IDs are all manually entered into a csv file for subsequent data grabbing.
 
 ## Code description
 
