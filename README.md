@@ -4,7 +4,10 @@ RUC course project: Advanced Statistical Analysis in Spring 2023.
 
 ## File folder description
 
-Data is from https://github.com/wandleshen/vup-data-analysis. So many thanks to this friend! Code is contained in vup.Rmd and the output file is vup.html.
+*data.h5* and *vtb.csv* are from https://github.com/wandleshen/vup-data-analysis (*data.csv* is translated from *data.h5* and I added some features on *vtb.csv* to construct *vtb2.csv*.) Code is contained in vup.Rmd and the output file is vup.html. My presentation slides is *presentation.pdf* and final report is *analysis_report.pdf*. *acc_form.docx* is JASA-required author contributions checklist (ACC) form.
+
+Thanks for your reading! If your time is limited, just read *analysis_report*!
+
 
 ## Data description
 
@@ -13,6 +16,7 @@ Select 50 different virtual hosts and get revenue and engagement data for their 
 ## Code description
 
 I do data analysis with Rmarkdown. First read data with python virtual environment in ananconda. (You maybe need to modify this part by your environment.) Then use R to do other things: EDA, random forest, regression adjustment, causal forest and matching method with both regression adjustment and causal forest. 
+
 I will show both regression adjustment and causal forest with(out) matching method. The results are quite similar.
 
 ## Main results
@@ -23,7 +27,7 @@ I will show both regression adjustment and causal forest with(out) matching meth
 
 • Given variables *{danmakusCount,timeDuration, watchCount, interactionCount,superchatCount, membershipCount,followers}*, treatment **Independent** has significant causal effect but treatment **Weekend** does not. 
 
-In other words, more viewer exposure can bring more benefit. While if conditioning on viwer exposure, affilliation of vup still makes about 20% difference but whether starting live on weekends or not makes no difference.
+In other words, more viewer exposure can bring more benefit. While if conditioning on viewer exposure, affilliation of vup still makes about 20% difference but whether starting live on weekends or not makes no difference.
 
 ## Acknowledgement
 
