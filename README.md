@@ -6,7 +6,7 @@ RUC course project: Advanced Statistical Analysis in Spring 2023.
 
 `data.h5` and `vtb.csv` are from https://github.com/wandleshen/vup-data-analysis (`data.csv` is translated from `data.h5` and I added some features on `vtb.csv` to construct `vtb2.csv`.) 
 
-Code is contained in *vup.Rmd* and the output file is `vup.html`. 
+Code is contained in `vup.Rmd` and the output file is `vup.html`. 
 
 My presentation slides is `presentation.pdf` and final report is `analysis_report.pdf`. `acc_form.docx` is JASA-required author contributions checklist (ACC) form.
 
