@@ -39,4 +39,4 @@ Overall, more viewer exposure can bring more benefit. While if conditioning on v
 
 ## Acknowledgement
 
-So many thanks! Thank https://github.com/wandleshen/ for his data. Thank https://weibo.com/u/7743187451 for her love. Thank Prof. Ma for his kindness.
+So many thanks! Thank https://github.com/wandleshen/ for his data. Thank https://weibo.com/u/7743187451 for her support. Thank Prof. Ma for his kindness.
